@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -19,25 +20,137 @@ import tools
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_MODEL = "deepseek-chat"
 
+# The save tool rejects a cold_dm that never states the service offer, so the
+# agent's loop feeds the error back to the model and it rewrites the DM.
+OFFER_INDICATOR_RE = re.compile(
+    r"(\b(?:i|we)\s+(?:build|make|create|offer|provide)\b"
+    r"|\b(?:i|we)\s+help\b"
+    r"|done[\s-]for[\s-]you"
+    r"|\bturnkey\b"
+    r"|for you so you don'?t"
+    r"|heavy lifting)",
+    re.IGNORECASE
+)
+COLD_DM_MISSING_OFFER_ERROR = (
+    "The cold_dm text appears to be missing the service offer "
+    "(Hook/Insight present, but no 'I build...for you' statement found). "
+    "Rewrite the DM to include it, then call save_outreach_proposal again."
+)
+
 AGENT_SYSTEM_PROMPT = """You are an elite YouTube Monetization Strategist and Outreach Copywriter.
-Your goal is to deeply analyze an influencer's YouTube channel, identify high-value monetization gaps, and craft a high-converting, personalized Cold Outreach DM.
+Your goal: find ONE strong, provable, personal hook and turn it into a single high-converting Cold DM - not a generic report.
 
 ### YOUR WORKFLOW:
-1. First, inspect the channel overview using `get_channel_overview` to understand size, niche, country, and reach.
-2. Next, fetch recent videos and descriptions using `get_recent_videos` to detect what monetization they already have (affiliates, sponsorships, merchandise, memberships, courses) and what they lack (e.g. high-ticket offer, dedicated sales funnel, email list).
-3. If relevant, inspect audience comments with `get_video_comments` to pinpoint recurring questions, community pain points, or unmet subscriber demands.
-4. Run `detect_monetization_matrix` to formalize the exact monetization breakdown (course, coaching, consulting, community, newsletter, affiliate, sponsorship, product, merch).
-5. Synthesize your strategic monetization audit (Pain points & Revenue gaps).
-6. Craft a punchy, human Cold DM (Instagram/Twitter/LinkedIn):
-   - Hook: Reference a specific recent video, milestone, or topic they covered.
-   - The Insight: Gently point out their specific monetization bottleneck based on the matrix (e.g., losing revenue relying only on affiliate links when audience wants a structured community/course).
-   - The Offer: Propose building them a turnkey monetization asset (e.g., custom course + automated funnel) with zero heavy lifting for them.
-   - Soft CTA: A low-friction question (e.g., "Open to seeing a 2-min breakdown?").
-   - Tone: Friendly, peer-to-peer, direct, zero corporate buzzwords.
-   - NO placeholders like '[Name]' (if no personal name is found, use 'Hey there,' or hook first).
-   - Give exactly ONE final, polished version of the message.
-7. Call `save_outreach_proposal` with the audit text, the monetization matrix JSON, the final cold DM, and 1-3 specific personalization terms used in the message.
-8. Return a concise executive summary to the user.
+1. Call `get_channel_overview` to get size, niche, country, creation date and uploads playlist ID.
+2. Call `get_recent_videos` (limit 20-25). Each video now includes engagement stats (views, likes, comments_count) - use them to find standout videos and what content resonates.
+3. Call `get_video_comments` with 4-6 recent video IDs (max_comments 20-30). The tool returns a question-first, representative sample across those videos.
+4. Call `extract_external_links`. Takes NO arguments - it classifies URLs from the channel description and video descriptions you already fetched.
+5. Call `detect_monetization_matrix`. Takes NO arguments - it uses the channel description and video descriptions you already fetched (plus the extracted links).
+6. Call `detect_risk_flags`. Takes NO arguments - it scans the already-fetched comments and video titles.
+7. Synthesize: CONTENT ANALYSIS -> AUDIENCE ANALYSIS -> MONETIZATION -> INFLUENCER PAIN -> OPPORTUNITY -> RISK.
+8. Call `save_outreach_proposal` with report_text (the FULL report in the FINAL REPORT FORMAT below), cold_dm (exactly ONE final DM), and matrix (the JSON produced by detect_monetization_matrix).
+9. Return a concise executive summary: channel, main pain + evidence, opportunity, risk status, and the final Cold DM.
+
+### CONTENT ANALYSIS:
+Identify the creator's Core Expertise - what they can actually explain/teach their audience. NOT "Crypto influencer", but e.g. "Primarily creates educational content around finding early-stage crypto projects and evaluating tokens before exchange listings". Also determine: main topics, recurring themes, audience level (beginner/intermediate/advanced), content type (educational/news/opinion/entertainment), and 2-3 standout videos (real titles, with view counts) most relevant for the future product and DM personalization.
+
+### AUDIENCE ANALYSIS (the most important block):
+Use ONLY the comments you actually fetched. NEVER invent comments or quotes. Determine:
+- Repeated Questions: what viewers ask again and again.
+- Audience Pain Points: problems that regularly come up.
+- Audience Requests: tutorial / guide / step-by-step / checklist / template / deeper explanation / specific workflow.
+- Buying/Product Signals: signs the audience needs a structured product.
+IMPORTANT: "Great video!" is NOT a pain point. "Can you make a step-by-step guide on how you find these coins?" IS an audience signal.
+
+### MONETIZATION ANALYSIS:
+Use the matrix and extracted links. Link beats word: "my course: teachable.com/..." proves a course exists; "thinking about creating a course" does NOT. List current monetization, external links by category, the monetization gap, and your confidence.
+
+### FACT VS INFERENCE:
+Label statements as FACT (directly observed: a real title, comment, link) or INFERENCE (your interpretation). Never present inference as fact.
+
+### EVIDENCE:
+Support the main pain with concrete evidence: real video titles, short real comment quotes, real links from the tool results. Never fabricate quotes.
+
+### INFLUENCER PAIN (specific, never generic):
+The real pain formula: the audience repeatedly asks for X + the creator demonstrably has expertise in X + there is no structured product covering X.
+FORBIDDEN generic phrases: "You aren't monetizing enough", "You have huge potential", "You should create a course", "Your audience is very engaged", "You could make more money".
+
+### OPPORTUNITY:
+Recommend ONE product format the evidence supports (course, workshop, paid guide, template, community, newsletter, coaching...). Do NOT always propose a course. If the evidence is insufficient, write: "Insufficient evidence for a specific product opportunity."
+
+### COLD DM RULES:
+Write exactly ONE final Cold DM. Conversational, short, direct, human, low-pressure. No generic praise ("Love your content"), no corporate jargon, no full business-model dump. Structure: hook with a specific piece of their content -> specific audience signal -> specific monetization gap -> concrete offer -> soft question CTA. The Offer step is MANDATORY regardless of how weak or strong the audience-demand evidence is. A low-confidence demand signal changes HOW confidently you frame the pitch (e.g. 'this could be worth exploring' instead of 'your audience is clearly ready to buy'), but it never means omitting the offer itself. Every Cold DM must contain one clear sentence stating what you build for them (a turnkey course + funnel, done for you) - a DM that only asks a reflective question with no stated offer is incomplete and must not be saved. NEVER invent names, video titles, quotes or facts. No '[Name]' placeholders (use 'Hey there,' or hook first if no personal name is found). Use the creator's real name only if it appeared in the fetched data.
+
+### RISK GATE:
+If the risk flags include referral_farming or unverifiable_token_hype, or the video descriptions promote leveraged trading signals / bots with win-rate claims, do NOT propose a signals, trading-tips or bot product. Propose an education-only offer (risk management, fundamentals), or recommend skipping this channel and state the reason in the summary.
+
+### FINAL REPORT FORMAT (use exactly this structure in report_text):
+================================
+INFLUENCER
+==========
+
+Channel:
+Handle:
+Subscribers:
+Niche:
+Core Expertise:
+
+================================
+CONTENT
+=======
+
+Main Topics:
+Recurring Themes:
+Relevant Videos:
+
+================================
+AUDIENCE
+========
+
+Repeated Questions:
+Audience Pain Points:
+Audience Requests:
+Buying/Product Signals:
+
+================================
+MONETIZATION
+============
+
+Current Monetization:
+External Links:
+Monetization Gap:
+Confidence:
+
+================================
+INFLUENCER PAIN
+===============
+
+Main Pain:
+Evidence:
+Why It Matters:
+Confidence:
+
+================================
+OPPORTUNITY
+===========
+
+Recommended Product:
+Why This Product:
+Audience Demand:
+Creator Expertise:
+
+================================
+RISK
+====
+
+Risk Status:
+Risk Flags:
+
+================================
+COLD DM
+=======
+
+[ONE FINAL COLD DM]
 """
 
 AGENT_TOOLS_SCHEMA = [
@@ -62,7 +175,7 @@ AGENT_TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "get_recent_videos",
-            "description": "Fetch the channel's most recent videos with titles and descriptions to analyze content and current monetization.",
+            "description": "Fetch the channel's most recent videos with titles, descriptions and engagement stats (views, likes, comments_count) to analyze content quality and current monetization.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -83,7 +196,7 @@ AGENT_TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "get_video_comments",
-            "description": "Fetch top legitimate audience comments from recent videos to discover audience pains, questions, and demand.",
+            "description": "Fetch a question-first, representative sample of legitimate audience comments across the given videos to discover repeated questions, pains and product demand.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -105,20 +218,32 @@ AGENT_TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "detect_monetization_matrix",
-            "description": "Analyze channel and video texts to compute the exact monetization matrix (course, coaching, consulting, community, newsletter, affiliate, sponsorship, product, merch) and confidence score.",
+            "description": "Analyze the channel description and video descriptions already fetched in previous steps to compute the exact monetization matrix (course, coaching, consulting, community, newsletter, affiliate, sponsorship, product, merch) and confidence score. Takes no arguments.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "channel_desc": {
-                        "type": "string",
-                        "description": "Channel description text."
-                    },
-                    "video_descs": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of recent video description texts."
-                    }
-                }
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_risk_flags",
+            "description": "Scan the audience comments and video titles already fetched in previous steps for high-risk promotion patterns (referral farming, unverifiable token hype, leveraged signals or win-rate bot claims). Takes no arguments.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "extract_external_links",
+            "description": "Extract and classify external URLs (affiliate, course, community, newsletter, booking, social, product) from the channel description and video descriptions already fetched in previous steps. Takes no arguments.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
             }
         }
     },
@@ -136,27 +261,59 @@ AGENT_TOOLS_SCHEMA = [
                     },
                     "report_text": {
                         "type": "string",
-                        "description": "The strategic monetization analysis (overview, current monetization, identified gaps, pain points)."
-                    },
-                    "matrix": {
-                        "type": "object",
-                        "description": "The monetization matrix returned by detect_monetization_matrix."
+                        "description": "The FULL final report in the FINAL REPORT FORMAT (Influencer, Content, Audience, Monetization, Influencer Pain, Opportunity, Risk, Cold DM sections)."
                     },
                     "cold_dm": {
                         "type": "string",
                         "description": "The finalized, ready-to-send cold outreach DM."
                     },
-                    "personalization_terms": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Specific channel, video, topic, or milestone terms that appear in the Cold DM."
+                    "matrix": {
+                        "type": "object",
+                        "description": "The monetization matrix JSON produced by detect_monetization_matrix."
                     }
                 },
-                "required": ["channel_title", "report_text", "cold_dm", "matrix"]
+                "required": ["channel_title", "report_text", "cold_dm"]
             }
         }
     }
 ]
+
+
+def validate_tool_args(
+    name: str,
+    args: dict[str, Any],
+    schema: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Check tool args against the declared schema; coerce JSON-string arrays.
+
+    Raises ValueError on unknown keys so run()'s error feedback loop can send
+    the message back to the model for self-correction.
+    """
+    fn_schema = next(
+        (t["function"] for t in (schema if schema is not None else AGENT_TOOLS_SCHEMA)
+         if t["function"]["name"] == name),
+        None
+    )
+    if fn_schema is None:
+        raise ValueError(f"Unknown tool: {name}")
+
+    properties: dict[str, Any] = fn_schema.get("parameters", {}).get("properties", {})
+    unknown = sorted(k for k in args if k not in properties)
+    if unknown:
+        raise ValueError(
+            f"Unknown argument(s) {unknown} for {name}; expected {sorted(properties)}"
+        )
+
+    for key, spec in properties.items():
+        if spec.get("type") == "array" and isinstance(args.get(key), str):
+            try:
+                args[key] = json.loads(args[key])
+            except Exception as exc:
+                raise ValueError(
+                    f"Argument '{key}' for {name} must be a JSON array; failed to parse: {exc}"
+                ) from exc
+
+    return args
 
 
 def post_deepseek(api_key: str, payload: dict, model: str = DEFAULT_MODEL) -> dict:
@@ -201,9 +358,12 @@ class YouTubeAgent:
             raise ValueError("DeepSeek API Key is missing.")
 
         self.youtube = build("youtube", "v3", developerKey=youtube_api_key)
+        self.youtube._http.timeout = 120  # медленное соединение с Google API не должно обрывать запросы
         self.deepseek_api_key = deepseek_api_key
         self.model = os.environ.get("DEEPSEEK_MODEL") or model
         self.on_log = on_log or (lambda msg: None)
+        # Data accumulated from tool results; argument-free tools read from here.
+        self.state: dict[str, Any] = {}
 
     def log(self, message: str) -> None:
         self.on_log(message)
@@ -211,40 +371,95 @@ class YouTubeAgent:
     def execute_tool(self, name: str, args: dict[str, Any]) -> Any:
         """Dispatch tool calls to Python functions."""
         self.log(f"🛠️ [Tool Call] {name}({json.dumps(args, ensure_ascii=False)})")
+        args = validate_tool_args(name, args)
+
+        result: Any
+        summary: str
 
         if name == "get_channel_overview":
-            return tools.get_channel_overview(self.youtube, args["channel_input"])
+            result = tools.get_channel_overview(self.youtube, args["channel_input"])
+            self.state["channel_desc"] = result.get("description", "")
+            summary = (
+                f"1 channel: '{result.get('title')}', "
+                f"subscribers={result.get('subscribers')}, videos={result.get('video_count')}"
+            )
 
-        if name == "get_recent_videos":
+        elif name == "get_recent_videos":
             limit = args.get("limit", 10)
-            return tools.get_recent_videos(self.youtube, args["uploads_playlist_id"], limit=limit)
+            result = tools.get_recent_videos(self.youtube, args["uploads_playlist_id"], limit=limit)
+            self.state["video_descs"] = [v.get("description", "") for v in result]
+            self.state["video_titles"] = [v.get("title", "") for v in result]
+            titles = "; ".join((v.get("title", "") or "")[:60] for v in result[:3])
+            total_views = sum(v.get("views") or 0 for v in result)
+            summary = f"{len(result)} videos, {total_views:,} total views: {titles}"
 
-        if name == "get_video_comments":
+        elif name == "get_video_comments":
             vids = args.get("video_ids", [])
             max_c = args.get("max_comments", 15)
-            return tools.get_video_comments(self.youtube, vids, max_comments=max_c)
+            result = tools.get_video_comments(self.youtube, vids, max_comments=max_c)
+            self.state["comments"] = result
+            q_count = sum(1 for c in result if c.get("question"))
+            previews = " | ".join((c.get("text", "") or "")[:80] for c in result[:3])
+            summary = f"{len(result)} comments ({q_count} questions): {previews}"
 
-        if name == "detect_monetization_matrix":
-            ch_desc = args.get("channel_desc", "")
-            v_descs = args.get("video_descs", [])
-            matrix = tools.analyze_monetization_matrix(ch_desc, v_descs)
-            self.log(f"📊 [Monetization Matrix] {json.dumps(matrix, ensure_ascii=False, indent=2)}")
-            return matrix
-
-        if name == "save_outreach_proposal":
-            saved = tools.save_outreach_proposal(
-                channel_title=args["channel_title"],
-                report_text=args["report_text"],
-                cold_dm=args["cold_dm"],
-                matrix=args.get("matrix", {}),
-                personalization_terms=args.get("personalization_terms", [])
+        elif name == "detect_monetization_matrix":
+            links_state = self.state.get("external_links")
+            matrix = tools.analyze_monetization_matrix(
+                channel_desc=self.state.get("channel_desc", ""),
+                video_descs=self.state.get("video_descs", []),
+                external_links=links_state.get("links") if isinstance(links_state, dict) else None
             )
-            self.log(f"💾 [Saved] Reports written to: {saved['analysis_file']} and {saved['outreach_file']}")
-            return saved
+            self.state["matrix"] = matrix
+            self.log(f"📊 [Monetization Matrix] {json.dumps(matrix, ensure_ascii=False, indent=2)}")
+            result = matrix
+            detected = [k for k, v in matrix.items() if v is True]
+            summary = (
+                f"monetization_detected={matrix.get('monetization_detected')}, "
+                f"confidence={matrix.get('confidence')}, detected={detected}"
+            )
 
-        raise ValueError(f"Unknown tool: {name}")
+        elif name == "detect_risk_flags":
+            result = tools.detect_risk_flags(
+                comments=self.state.get("comments", []),
+                video_titles=self.state.get("video_titles", [])
+            )
+            self.state["risk_flags"] = result
+            summary = f"flags={result.get('risk_flags', [])}, scanned={result.get('texts_scanned')} texts"
 
-    def run(self, channel_input: str, max_steps: int = 8) -> dict[str, Any]:
+        elif name == "extract_external_links":
+            result = tools.extract_external_links(
+                channel_desc=self.state.get("channel_desc", ""),
+                video_descs=self.state.get("video_descs", [])
+            )
+            self.state["external_links"] = result
+            parts = ", ".join(f"{cat}×{cnt}" for cat, cnt in result.get("summary", {}).items())
+            summary = f"{result.get('total', 0)} links: {parts or 'none found'}"
+
+        elif name == "save_outreach_proposal":
+            if not OFFER_INDICATOR_RE.search(args.get("cold_dm", "")):
+                # Don't save silently: the error goes back to the model as a tool
+                # result so it rewrites the DM with the offer and calls again.
+                self.log("⚠️ [Offer Gate] cold_dm не содержит указания услуги - сохранение отклонено.")
+                result = {"error": COLD_DM_MISSING_OFFER_ERROR}
+                summary = "REJECTED: cold_dm is missing the service offer; rewrite the DM and call save_outreach_proposal again"
+            else:
+                saved = tools.save_outreach_proposal(
+                    channel_title=args["channel_title"],
+                    report_text=args["report_text"],
+                    cold_dm=args["cold_dm"],
+                    matrix=args.get("matrix") or self.state.get("matrix")
+                )
+                self.log(f"💾 [Saved] Reports written to: {saved['analysis_file']} and {saved['outreach_file']}")
+                result = saved
+                summary = f"files: {saved['analysis_file']}, {saved['outreach_file']}"
+
+        else:
+            raise ValueError(f"Unknown tool: {name}")
+
+        self.log(f"✅ [Result] {name} → {summary}")
+        return result
+
+    def run(self, channel_input: str, max_steps: int = 12) -> dict[str, Any]:
         """Run the autonomous agent loop for a given YouTube channel."""
         self.log(f"🚀 Запуск ИИ-агента для канала: {channel_input}")
 
@@ -257,6 +472,8 @@ class YouTubeAgent:
         ]
 
         saved_artifacts: dict[str, str] = {}
+        final_report = ""
+        final_dm = ""
 
         for step in range(1, max_steps + 1):
             self.log(f"🤔 [Шаг {step}] ИИ анализирует ситуацию...")
@@ -284,6 +501,8 @@ class YouTubeAgent:
                 return {
                     "summary": content,
                     "saved": saved_artifacts,
+                    "report": final_report,
+                    "cold_dm": final_dm,
                     "messages": messages
                 }
 
@@ -297,8 +516,10 @@ class YouTubeAgent:
 
                 try:
                     res = self.execute_tool(fn_name, fn_args)
-                    if fn_name == "save_outreach_proposal" and isinstance(res, dict):
+                    if fn_name == "save_outreach_proposal" and isinstance(res, dict) and "error" not in res:
                         saved_artifacts = res
+                        final_report = str(fn_args.get("report_text", "") or "")
+                        final_dm = str(fn_args.get("cold_dm", "") or "")
                     result_str = json.dumps(res, ensure_ascii=False)
                 except Exception as exc:
                     result_str = json.dumps({"error": str(exc)})
@@ -314,6 +535,8 @@ class YouTubeAgent:
         return {
             "summary": "Agent reached max steps limit.",
             "saved": saved_artifacts,
+            "report": final_report,
+            "cold_dm": final_dm,
             "messages": messages
         }
 
