@@ -1,49 +1,86 @@
 # YouTube AI Outreach Agent (DeepSeek)
 
-Автономный ИИ-агент (ReAct) для анализа каналов YouTube, выявления точек роста / упущенной монетизации и генерации персонализированных Cold Outreach сообщений.
+Python-приложение для анализа YouTube-каналов, поиска возможностей монетизации и генерации персонализированных Cold Outreach сообщений через DeepSeek.
 
-## 🚀 Возможности
-- **Автономный агент (DeepSeek Function Calling)**: Сам запрашивает данные канала через YouTube Data API, изучает последние видео, описания, монетизацию и комментарии зрителей.
-- **Поиск каналов по нишам**: Встроенный поиск каналов по ключевым словам/нише с отображением подписчиков, просмотров и видео.
-- **Персонализированный Cold DM**: Формирует четкое, целевое предложение без шаблонных заглушек вроде `[Name]`.
-- **Сохранение отчетов**: Автоматически сохраняет аудит и готовый Cold DM в папку `reports/channels/YYYY-MM-DD/`.
-- **Удобный GUI**: Современный темный интерфейс на Tkinter с живым логом мыслей агента.
+## Возможности
 
----
+- ReAct-агент с DeepSeek Function Calling.
+- Анализ канала, видео, статистики и комментариев аудитории.
+- Определение текущей монетизации по матрице.
+- Извлечение внешних ссылок и их классификация.
+- Risk-флаги для referral farming, token hype и продвижения торговых сигналов.
+- Rule-based проверка Cold DM перед сохранением.
+- Поиск каналов по нише с кэшированием результатов.
+- GUI с полным отчетом, отдельной вкладкой Cold DM, копированием сообщения и фильтрами по подписчикам.
+- Текстовые отчеты в `reports/channels/YYYY-MM-DD/`.
 
-## 🛠️ Установка и запуск
+## Требования
 
-1. Установите зависимости:
+- Python 3.11 или новее.
+- YouTube Data API v3 key.
+- DeepSeek API key.
+
+## Установка
+
 ```powershell
 pip install -r requirements.txt
 ```
 
-2. Запустите графический интерфейс (GUI):
-- Двойным кликом по `start_gui.bat`, либо в терминале:
+Ключи задаются через переменные окружения. Их нельзя коммитить или записывать в логи.
+
+### Windows PowerShell
+
+```powershell
+$env:YOUTUBE_API_KEY = "your_google_youtube_key"
+$env:DEEPSEEK_API_KEY = "your_deepseek_key"
+```
+
+### Linux/macOS
+
+```bash
+export YOUTUBE_API_KEY="your_google_youtube_key"
+export DEEPSEEK_API_KEY="your_deepseek_key"
+```
+
+Файл `.env` можно использовать как локальное хранилище переменных при загрузке его средствами окружения; приложение не сохраняет ключи на диск. Файл `.env` исключен из Git.
+
+## Запуск GUI
+
+Windows:
+
 ```powershell
 python app_gui.py
 ```
 
-3. Либо запустите консольного агента (CLI):
+или двойным кликом по `start_gui.bat`.
+
+Linux/macOS:
+
+```bash
+./start_gui.sh
+```
+
+Скрипт автоматически активирует локальный `venv`, если он существует.
+
+## Запуск CLI
+
 ```powershell
-set YOUTUBE_API_KEY=your_google_youtube_key
-set DEEPSEEK_API_KEY=your_deepseek_key
 python agent.py @handle_or_url
 ```
 
----
+Также поддерживаются URL каналов и Channel ID. Ссылки на отдельные видео отклоняются.
 
-## 🔑 Ключи API
-- **YouTube Data API v3**: Получается в [Google Cloud Console](https://console.cloud.google.com/).
-- **DeepSeek API Key**: Получается на [platform.deepseek.com](https://platform.deepseek.com/) (модель `deepseek-chat`).
+## Тесты
 
-Ключи читаются из переменных окружения. GUI не сохраняет ключи на диск; локальные файлы ключей не используются.
-
----
-
-## 🧪 Тестирование
-
-Запуск тестов:
 ```powershell
-python test_agent.py
+python -m unittest -v
 ```
+
+Текущий набор содержит 41 тест.
+
+## Структура отчетов
+
+- `analysis_<channel>.txt` — полный текстовый аудит с матрицей монетизации.
+- `outreach_dm_<channel>.txt` — проверенный Cold DM.
+
+Сгенерированные отчеты и локальные ключи не добавляются в Git.
