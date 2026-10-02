@@ -36,7 +36,7 @@ Your goal is to deeply analyze an influencer's YouTube channel, identify high-va
    - Tone: Friendly, peer-to-peer, direct, zero corporate buzzwords.
    - NO placeholders like '[Name]' (if no personal name is found, use 'Hey there,' or hook first).
    - Give exactly ONE final, polished version of the message.
-7. Call `save_outreach_proposal` with the audit text, the monetization matrix JSON, and the final cold DM.
+7. Call `save_outreach_proposal` with the audit text, the monetization matrix JSON, the final cold DM, and 1-3 specific personalization terms used in the message.
 8. Return a concise executive summary to the user.
 """
 
@@ -145,6 +145,11 @@ AGENT_TOOLS_SCHEMA = [
                     "cold_dm": {
                         "type": "string",
                         "description": "The finalized, ready-to-send cold outreach DM."
+                    },
+                    "personalization_terms": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Specific channel, video, topic, or milestone terms that appear in the Cold DM."
                     }
                 },
                 "required": ["channel_title", "report_text", "cold_dm", "matrix"]
@@ -231,7 +236,8 @@ class YouTubeAgent:
                 channel_title=args["channel_title"],
                 report_text=args["report_text"],
                 cold_dm=args["cold_dm"],
-                matrix=args.get("matrix", {})
+                matrix=args.get("matrix", {}),
+                personalization_terms=args.get("personalization_terms", [])
             )
             self.log(f"💾 [Saved] Reports written to: {saved['analysis_file']} and {saved['outreach_file']}")
             return saved

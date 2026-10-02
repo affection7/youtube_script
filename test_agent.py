@@ -43,22 +43,41 @@ class TestTools(unittest.TestCase):
         saved = tools.save_outreach_proposal(
             channel_title="Test Channel",
             report_text="Pain points & gaps",
-            cold_dm="Hey there, great channel!"
+            cold_dm="I noticed Test Channel's recent videos focus on practical tutorials. "
+                    "I have one idea to turn that audience interest into a simple offer.",
+            personalization_terms=["Test Channel", "practical tutorials"]
         )
         self.assertTrue(os.path.exists(saved["analysis_file"]))
         self.assertTrue(os.path.exists(saved["outreach_file"]))
 
         with open(saved["outreach_file"], "r", encoding="utf-8") as f:
-            self.assertIn("Hey there, great channel!", f.read())
+            self.assertIn("Test Channel", f.read())
 
         saved = tools.save_outreach_proposal(
             channel_title="Matrix Channel",
             report_text="Audit",
-            cold_dm="Hello",
-            matrix={"course": False, "affiliate": True}
+            cold_dm="Your Matrix Channel videos explain affiliate workflows clearly. "
+                    "Would you be open to a short breakdown of one additional offer?",
+            matrix={"course": False, "affiliate": True},
+            personalization_terms=["Matrix Channel", "affiliate workflows"]
         )
         with open(saved["analysis_file"], "r", encoding="utf-8") as f:
             self.assertIn('"affiliate": true', f.read())
+
+    def test_validate_cold_dm(self):
+        valid = tools.validate_cold_dm(
+            "I watched Test Channel's tutorial on automation and noticed one useful offer gap. "
+            "Would you be open to a short breakdown?",
+            ["Test Channel", "automation"]
+        )
+        self.assertTrue(valid["valid"])
+
+        invalid = tools.validate_cold_dm(
+            "Hey there, great channel! [Name]",
+            ["Test Channel"]
+        )
+        self.assertFalse(invalid["valid"])
+        self.assertGreaterEqual(len(invalid["issues"]), 3)
 
     def test_niche_search_cache(self):
         yt = MagicMock()
