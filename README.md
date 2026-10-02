@@ -37,7 +37,7 @@ python agent.py @handle_or_url
 - **YouTube Data API v3**: Получается в [Google Cloud Console](https://console.cloud.google.com/).
 - **DeepSeek API Key**: Получается на [platform.deepseek.com](https://platform.deepseek.com/) (модель `deepseek-chat`).
 
-По умолчанию ключи не сохраняются. При включении «Запомнить ключи» они записываются локально в файлы `api_key.local.txt` и `deepseek_key.local.txt` без шифрования (файлы добавлены в `.gitignore`).
+Ключи сохраняются локально в файлы `api_key.local.txt` и `deepseek_key.local.txt` (добавлены в `.gitignore`).
 
 ---
 
