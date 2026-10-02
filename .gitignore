@@ -1,0 +1,24 @@
+# API key: plain-text file written by the GUI when "Remember" is ticked.
+# Never commit it - use the YOUTUBE_API_KEY environment variable instead.
+api_key.local.txt
+
+# Gemini key for --score / the GUI "AI verdict" checkbox (plain text too).
+gemini_key.local.txt
+
+# DeepSeek key for --score / the GUI "AI verdict" checkbox (plain text too).
+deepseek_key.local.txt
+
+# NordRouter key for --score / the GUI "AI verdict" checkbox (plain text too).
+nordrouter_key.local.txt
+
+# Generated reports (regenerated on every run; see README "Output layout")
+reports/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment variables and secrets
+.env
