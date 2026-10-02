@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 import os
 import json
+import urllib.error
 
 import tools
 import agent
@@ -144,6 +145,33 @@ class TestNicheSearch(unittest.TestCase):
         tools.search_channels_by_niche(yt, "test", max_results=1)
 
         self.assertEqual(yt.search.return_value.list.call_count, 1)
+
+
+class TestApiRetries(unittest.TestCase):
+    @patch("tools.time.sleep")
+    def test_youtube_request_retries_timeout(self, mock_sleep):
+        request = MagicMock()
+        request.execute.side_effect = [TimeoutError("temporary"), {"items": []}]
+
+        result = tools.execute_with_retries(request)
+
+        self.assertEqual(result, {"items": []})
+        self.assertEqual(request.execute.call_count, 2)
+        mock_sleep.assert_called_once_with(tools.RETRY_BACKOFF_SECONDS)
+
+    @patch("agent.time.sleep")
+    @patch("agent.urllib.request.urlopen")
+    def test_deepseek_retries_network_error(self, mock_urlopen, mock_sleep):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b'{"choices": []}'
+        mock_urlopen.side_effect = [urllib.error.URLError("temporary"), response]
+
+        result = agent.post_deepseek("key", {"messages": []})
+
+        self.assertEqual(result, {"choices": []})
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once_with(agent.RETRY_BACKOFF_SECONDS)
 
 
 class TestToolArgsValidation(unittest.TestCase):

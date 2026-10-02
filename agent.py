@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable
@@ -19,6 +20,9 @@ import tools
 
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_MODEL = "deepseek-chat"
+MAX_API_RETRIES = 3
+RETRY_BACKOFF_SECONDS = 0.5
+RETRYABLE_HTTP_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
 # The save tool rejects a cold_dm that never states the service offer, so the
 # agent's loop feeds the error back to the model and it rewrites the DM.
@@ -335,14 +339,20 @@ def post_deepseek(api_key: str, payload: dict, model: str = DEFAULT_MODEL) -> di
         method="POST"
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"DeepSeek API HTTP {exc.code}: {body}") from exc
-    except Exception as exc:
-        raise RuntimeError(f"DeepSeek API network error: {exc}") from exc
+    for attempt in range(MAX_API_RETRIES):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            if exc.code not in RETRYABLE_HTTP_STATUS_CODES or attempt == MAX_API_RETRIES - 1:
+                raise RuntimeError(f"DeepSeek API HTTP {exc.code}: {body}") from exc
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            if attempt == MAX_API_RETRIES - 1:
+                raise RuntimeError(f"DeepSeek API network error: {exc}") from exc
+        time.sleep(RETRY_BACKOFF_SECONDS * (2 ** attempt))
+
+    raise RuntimeError("DeepSeek API request failed after retries")
 
 
 class YouTubeAgent:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import unicodedata
 from datetime import datetime
 from typing import Any
@@ -20,6 +21,23 @@ except ImportError:
 
 REPORTS_DIR = os.path.join("reports", "channels")
 _NICHE_CACHE: dict[tuple[str, int], list[dict[str, Any]]] = {}
+MAX_API_RETRIES = 3
+RETRY_BACKOFF_SECONDS = 0.5
+RETRYABLE_HTTP_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+
+
+def execute_with_retries(request: Any) -> Any:
+    """Execute a Google API request with bounded retries and exponential backoff."""
+    for attempt in range(MAX_API_RETRIES):
+        try:
+            return request.execute()
+        except Exception as exc:
+            resp = getattr(exc, "resp", None)
+            status = getattr(exc, "status_code", None) or getattr(resp, "status", None)
+            retryable = isinstance(exc, (TimeoutError, ConnectionError)) or status in RETRYABLE_HTTP_STATUS_CODES
+            if not retryable or attempt == MAX_API_RETRIES - 1:
+                raise
+            time.sleep(RETRY_BACKOFF_SECONDS * (2 ** attempt))
 
 COLD_DM_MIN_LENGTH = 40
 COLD_DM_MAX_LENGTH = 800
@@ -106,20 +124,22 @@ def resolve_channel(youtube, channel_input: str) -> dict[str, Any]:
     kind, value = parsed
 
     if kind == "id":
-        resp = youtube.channels().list(
+        request = youtube.channels().list(
             part="snippet,statistics,contentDetails,brandingSettings",
             id=value
-        ).execute()
+        )
+        resp = execute_with_retries(request)
         items = resp.get("items", [])
         if items:
             return items[0]
 
     if kind == "handle":
         try:
-            resp = youtube.channels().list(
+            request = youtube.channels().list(
                 part="snippet,statistics,contentDetails,brandingSettings",
                 forHandle=value
-            ).execute()
+            )
+            resp = execute_with_retries(request)
             items = resp.get("items", [])
             if items:
                 return items[0]
@@ -127,12 +147,13 @@ def resolve_channel(youtube, channel_input: str) -> dict[str, Any]:
             pass
 
         # Fallback to search if direct handle resolution fails
-        search_resp = youtube.search().list(
+        search_request = youtube.search().list(
             part="snippet",
             q=value,
             type="channel",
             maxResults=1
-        ).execute()
+        )
+        search_resp = execute_with_retries(search_request)
         search_items = search_resp.get("items", [])
         if search_items:
             ch_id = search_items[0]["snippet"]["channelId"]
@@ -150,12 +171,13 @@ def search_channels_by_niche(youtube, query: str, max_results: int = 25) -> list
     if cache_key in _NICHE_CACHE:
         return [dict(item) for item in _NICHE_CACHE[cache_key]]
 
-    search_resp = youtube.search().list(
+    search_request = youtube.search().list(
         part="snippet",
         q=query.strip(),
         type="channel",
         maxResults=min(max_results, 50)
-    ).execute()
+    )
+    search_resp = execute_with_retries(search_request)
 
     items = search_resp.get("items", [])
     if not items:
@@ -165,10 +187,11 @@ def search_channels_by_niche(youtube, query: str, max_results: int = 25) -> list
     if not channel_ids:
         return []
 
-    details_resp = youtube.channels().list(
+    details_request = youtube.channels().list(
         part="snippet,statistics",
         id=",".join(channel_ids)
-    ).execute()
+    )
+    details_resp = execute_with_retries(details_request)
 
     results = []
     for it in details_resp.get("items", []):
@@ -222,11 +245,12 @@ def get_recent_videos(youtube, uploads_playlist_id: str, limit: int = 10) -> lis
     if not uploads_playlist_id:
         return []
 
-    resp = youtube.playlistItems().list(
+    request = youtube.playlistItems().list(
         part="snippet,contentDetails",
         playlistId=uploads_playlist_id,
         maxResults=min(limit, 50)
-    ).execute()
+    )
+    resp = execute_with_retries(request)
 
     videos = []
     for it in resp.get("items", []):
@@ -246,10 +270,11 @@ def get_recent_videos(youtube, uploads_playlist_id: str, limit: int = 10) -> lis
     stats_by_id: dict[str, dict[str, Any]] = {}
     for i in range(0, len(video_ids), 50):
         try:
-            stats_resp = youtube.videos().list(
+            stats_request = youtube.videos().list(
                 part="statistics",
                 id=",".join(video_ids[i:i + 50])
-            ).execute()
+            )
+            stats_resp = execute_with_retries(stats_request)
             for item in stats_resp.get("items", []):
                 st = item.get("statistics", {})
                 stats_by_id[item.get("id")] = {
@@ -298,13 +323,14 @@ def get_video_comments(youtube, video_ids: list[str], max_comments: int = 15) ->
     for vid in video_ids:
         candidates: list[dict[str, Any]] = []
         try:
-            resp = youtube.commentThreads().list(
+            request = youtube.commentThreads().list(
                 part="snippet",
                 videoId=vid,
                 maxResults=50,
                 textFormat="plainText",
                 order="relevance"
-            ).execute()
+            )
+            resp = execute_with_retries(request)
 
             for item in resp.get("items", []):
                 sn = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
