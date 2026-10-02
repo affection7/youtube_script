@@ -12,9 +12,6 @@ from typing import Any
 import tools
 from agent import YouTubeAgent, DEFAULT_MODEL
 
-YT_KEY_FILE = "api_key.local.txt"
-DS_KEY_FILE = "deepseek_key.local.txt"
-
 BG_DARK = "#18181b"
 BG_PANEL = "#27272a"
 BG_INPUT = "#3f3f46"
@@ -82,10 +79,6 @@ class YouTubeAgentGUI:
         ttk.Label(key_frame, text="DeepSeek API Key:", style="Panel.TLabel").grid(row=0, column=2, sticky="w", padx=12, pady=2)
         self.ds_key_entry = ttk.Entry(key_frame, show="•", width=36)
         self.ds_key_entry.grid(row=0, column=3, padx=6, pady=2)
-
-        self.remember_keys_var = tk.BooleanVar(value=True)
-        remember_cb = ttk.Checkbutton(key_frame, text="Запомнить ключи", variable=self.remember_keys_var)
-        remember_cb.grid(row=0, column=4, padx=12, pady=2)
 
         # 2. Main Tabs
         self.notebook = ttk.Notebook(self.root)
@@ -246,35 +239,14 @@ class YouTubeAgentGUI:
         self.tree.pack(fill=tk.BOTH, expand=True)
 
     def _load_saved_keys(self):
+        """Load API keys from environment variables only."""
         yt_k = os.environ.get("YOUTUBE_API_KEY", "")
-        if not yt_k and os.path.exists(YT_KEY_FILE):
-            try:
-                with open(YT_KEY_FILE, "r", encoding="utf-8") as f:
-                    yt_k = f.read().strip()
-            except Exception:
-                pass
         if yt_k:
             self.yt_key_entry.insert(0, yt_k)
 
         ds_k = os.environ.get("DEEPSEEK_API_KEY", "")
-        if not ds_k and os.path.exists(DS_KEY_FILE):
-            try:
-                with open(DS_KEY_FILE, "r", encoding="utf-8") as f:
-                    ds_k = f.read().strip()
-            except Exception:
-                pass
         if ds_k:
             self.ds_key_entry.insert(0, ds_k)
-
-    def _save_keys_if_needed(self, yt_key: str, ds_key: str):
-        if self.remember_keys_var.get():
-            try:
-                with open(YT_KEY_FILE, "w", encoding="utf-8") as f:
-                    f.write(yt_key.strip())
-                with open(DS_KEY_FILE, "w", encoding="utf-8") as f:
-                    f.write(ds_key.strip())
-            except Exception:
-                pass
 
     def _log(self, text: str):
         self.msg_queue.put(("log", text))
@@ -418,7 +390,6 @@ class YouTubeAgentGUI:
             messagebox.showwarning("Внимание", "Укажите канал для анализа.")
             return
 
-        self._save_keys_if_needed(yt_k, ds_k)
         self.is_running = True
         self.run_btn.config(state=tk.DISABLED)
         self.log_text.delete("1.0", tk.END)
