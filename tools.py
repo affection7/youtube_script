@@ -553,6 +553,7 @@ def analyze_monetization_matrix(
     matrix: dict[str, Any] = {}
     detected_count = 0
     total_matches = 0
+    match_windows: dict[str, str] = {}
 
     for key, regex_list in patterns.items():
         matched = False
@@ -565,12 +566,32 @@ def analyze_monetization_matrix(
                     continue
                 matched = True
                 total_matches += 1
+                match_windows[key] = window
                 break
             if matched:
                 break
         matrix[key] = matched
         if matched:
             detected_count += 1
+
+    # The word "course" alone is too weak: require link/platform proof, otherwise
+    # a channel that merely mentions "course" would look like it sells one.
+    unconfirmed: list[str] = []
+    if matrix.get("course"):
+        window = match_windows.get("course", "")
+        has_evidence = (
+            bool(URL_RE.search(window))
+            or bool(COURSE_PLATFORM_RE.search(lower))
+            or any(
+                isinstance(link, dict) and str(link.get("category")) == "course"
+                for link in (external_links or [])
+            )
+        )
+        if not has_evidence:
+            matrix["course"] = False
+            unconfirmed.append("course")
+            detected_count = max(0, detected_count - 1)
+            total_matches = max(0, total_matches - 1)
 
     # Structured links are stronger evidence than words in descriptions.
     confirmed_by_links: list[str] = []
@@ -611,7 +632,16 @@ def analyze_monetization_matrix(
     matrix["monetization_detected"] = monetization_detected
     matrix["confidence"] = round(confidence, 2)
     matrix["confirmed_by_links"] = confirmed_by_links
+    matrix["unconfirmed"] = unconfirmed
     return matrix
+
+
+COURSE_PLATFORM_RE = re.compile(
+    r"(teachable\.com|kajabi\.com|udemy\.com|skillshare\.com|thinkific\.com|"
+    r"hotmart\.com|podia\.com|learnworlds\.com|masterclass\.com|"
+    r"coursera\.org|edx\.org|domestika\.org)",
+    re.IGNORECASE
+)
 
 
 URL_RE = re.compile(r"https?://[^\s)\]>\"'<>]+", re.IGNORECASE)

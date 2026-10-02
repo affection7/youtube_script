@@ -337,6 +337,26 @@ class TestMonetizationMatrixLinksAndIntent(unittest.TestCase):
         self.assertGreaterEqual(matrix["confidence"], 0.9)
         self.assertIn("course", matrix["confirmed_by_links"])
 
+    def test_course_word_without_link_not_confirmed(self):
+        matrix = tools.analyze_monetization_matrix(
+            channel_desc="Join my course and learn trading basics"
+        )
+        self.assertFalse(matrix["course"])
+        self.assertIn("course", matrix["unconfirmed"])
+
+    def test_course_platform_domain_confirms(self):
+        matrix = tools.analyze_monetization_matrix(
+            channel_desc="My full course is hosted on teachable.com"
+        )
+        self.assertTrue(matrix["course"])
+        self.assertNotIn("course", matrix["unconfirmed"])
+
+    def test_course_url_in_text_confirms(self):
+        matrix = tools.analyze_monetization_matrix(
+            channel_desc="Enroll in my course: https://mysite.io/join"
+        )
+        self.assertTrue(matrix["course"])
+
 
 class TestCommentSampling(unittest.TestCase):
     def _fake_threads(self, texts_by_video):
