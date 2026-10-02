@@ -22,6 +22,10 @@ class TestTools(unittest.TestCase):
         self.assertEqual(tools.parse_channel_input("UC1234567890123456789012"), ("id", "UC1234567890123456789012"))
         self.assertIsNone(tools.parse_channel_input(""))
 
+    def test_parse_video_url_rejected(self):
+        with self.assertRaises(ValueError):
+            tools.parse_channel_input("https://www.youtube.com/watch?v=abc123")
+
     def test_analyze_monetization_matrix(self):
         matrix = tools.analyze_monetization_matrix(
             channel_desc="Join my course at teachable.com and buy merch!",
@@ -119,6 +123,27 @@ class TestRiskFlags(unittest.TestCase):
             video_titles=["How I shoot cinematic video"]
         )
         self.assertEqual(res["risk_flags"], [])
+
+
+class TestNicheSearch(unittest.TestCase):
+    def test_search_cache(self):
+        yt = MagicMock()
+        search_request = MagicMock()
+        yt.search.return_value.list.return_value = search_request
+        search_request.execute.return_value = {
+            "items": [{"snippet": {"channelId": "UC1"}}]
+        }
+        channel_request = MagicMock()
+        yt.channels.return_value.list.return_value = channel_request
+        channel_request.execute.return_value = {
+            "items": [{"id": "UC1", "snippet": {"title": "Test"}, "statistics": {}}]
+        }
+
+        tools._NICHE_CACHE.clear()
+        tools.search_channels_by_niche(yt, "test", max_results=1)
+        tools.search_channels_by_niche(yt, "test", max_results=1)
+
+        self.assertEqual(yt.search.return_value.list.call_count, 1)
 
 
 class TestToolArgsValidation(unittest.TestCase):

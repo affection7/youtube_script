@@ -8,7 +8,7 @@ import re
 import unicodedata
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 try:
     from googleapiclient.discovery import build
@@ -19,6 +19,7 @@ except ImportError:
 
 
 REPORTS_DIR = os.path.join("reports", "channels")
+_NICHE_CACHE: dict[tuple[str, int], list[dict[str, Any]]] = {}
 
 COLD_DM_MIN_LENGTH = 40
 COLD_DM_MAX_LENGTH = 800
@@ -83,6 +84,11 @@ def parse_channel_input(user_input: str) -> tuple[str, str] | None:
             return ("handle", parts[0][1:])
         if len(parts) >= 2 and parts[0] == "channel":
             return ("id", parts[1])
+        if parts and parts[0] in ("watch", "shorts", "live", "embed"):
+            video_id = parse_qs(parsed.query).get("v", [None])[0]
+            if video_id or parts[0] in ("shorts", "live", "embed"):
+                raise ValueError("Указана ссылка на видео, а не на канал")
+            raise ValueError(f"Недостаточно данных для определения канала: '{user_input}'")
         if parts:
             if parts[0] in ("c", "user") and len(parts) >= 2:
                 return ("handle", parts[1])
@@ -140,6 +146,10 @@ def search_channels_by_niche(youtube, query: str, max_results: int = 25) -> list
     if not query.strip():
         return []
 
+    cache_key = (query.strip().casefold(), min(max_results, 50))
+    if cache_key in _NICHE_CACHE:
+        return [dict(item) for item in _NICHE_CACHE[cache_key]]
+
     search_resp = youtube.search().list(
         part="snippet",
         q=query.strip(),
@@ -176,7 +186,8 @@ def search_channels_by_niche(youtube, query: str, max_results: int = 25) -> list
             "matrix": analyze_monetization_matrix(sn.get("description", ""))
         })
 
-    return results
+    _NICHE_CACHE[cache_key] = results
+    return [dict(item) for item in results]
 
 
 def get_channel_overview(youtube, channel_input: str) -> dict[str, Any]:
