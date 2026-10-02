@@ -65,6 +65,136 @@ QUESTION_HINTS_RE = re.compile(
     re.IGNORECASE
 )
 
+REQUEST_HINTS_RE = re.compile(
+    r"(\btutorial\b|\bguide\b|\bstep[- ]by[- ]step\b|\bchecklist\b|\btemplate\b|"
+    r"\bcourse\b|\bmake a video about\b|\bcan you (?:make|do|explain|show)\b|"
+    r"\bhow do i\b|"
+    r"\bтуториал\b|\bгайд\b|\bпошагов\b|\bчек[- ]?лист\b|\bшаблон\b|\bкурс\b|"
+    r"\bобъясни\b|\bпокажи\b)",
+    re.IGNORECASE
+)
+
+MICRO_SUBSCRIBER_MIN = 1_000
+MICRO_SUBSCRIBER_MAX = 10_000
+ENGAGEMENT_GOOD_THRESHOLD = 0.03
+ENGAGEMENT_WEAK_THRESHOLD = 0.01
+
+
+def analyze_audience_signals(
+    comments: list[dict[str, Any]] | list[str] | None = None
+) -> dict[str, Any]:
+    """Extract question and product-request signals from fetched comments."""
+    total = 0
+    questions: list[str] = []
+    requests: list[str] = []
+
+    for c in comments or []:
+        text = str(c.get("text", "")) if isinstance(c, dict) else str(c)
+        text = text.strip()
+        if not text:
+            continue
+        total += 1
+        if QUESTION_HINTS_RE.search(text):
+            questions.append(text)
+        if REQUEST_HINTS_RE.search(text):
+            requests.append(text)
+
+    return {
+        "total_comments": total,
+        "question_count": len(questions),
+        "question_ratio": round(len(questions) / total, 2) if total else 0.0,
+        "request_count": len(requests),
+        "question_examples": questions[:5],
+        "request_examples": requests[:5],
+    }
+
+
+def compute_engagement_rate(
+    subscribers: Any,
+    views_list: list[Any] | None = None
+) -> float | None:
+    """Compute average views per recent video divided by subscriber count."""
+    subs = _int_or_none(subscribers)
+    if not subs:
+        return None
+
+    views = [_int_or_none(v) for v in (views_list or [])]
+    valid_views = [v for v in views if v is not None and v > 0]
+    if not valid_views:
+        return None
+
+    avg_views = sum(valid_views) / len(valid_views)
+    return round(avg_views / subs, 4)
+
+
+def compute_outreach_priority(
+    subscribers: Any,
+    engagement_rate: float | None,
+    matrix: dict[str, Any] | None = None,
+    signals: dict[str, Any] | None = None,
+    risk_flags: list[str] | None = None
+) -> dict[str, Any]:
+    """Return a deterministic HIGH/MEDIUM/LOW/SKIP outreach priority."""
+    reasons: list[str] = []
+    score = 0
+    max_score = 4
+
+    subs = _int_or_none(subscribers)
+    in_range = subs is not None and MICRO_SUBSCRIBER_MIN <= subs <= MICRO_SUBSCRIBER_MAX
+    if in_range:
+        score += 1
+        reasons.append("subscriber count within micro range")
+    else:
+        reasons.append("subscriber count outside micro range")
+
+    if engagement_rate is not None:
+        if engagement_rate >= ENGAGEMENT_GOOD_THRESHOLD:
+            score += 1
+            reasons.append(f"good engagement rate ({engagement_rate:.1%})")
+        elif engagement_rate < ENGAGEMENT_WEAK_THRESHOLD:
+            reasons.append(f"weak engagement rate ({engagement_rate:.1%})")
+        else:
+            reasons.append(f"moderate engagement rate ({engagement_rate:.1%})")
+    else:
+        reasons.append("engagement rate unavailable")
+
+    matrix = matrix or {}
+    has_education_product = matrix.get("course") or matrix.get("coaching") or matrix.get("consulting")
+    if not has_education_product:
+        score += 1
+        reasons.append("no structured education product detected")
+    else:
+        reasons.append("education product already present")
+
+    signals = signals or {}
+    if signals.get("request_count"):
+        score += 1
+        reasons.append(f"{signals['request_count']} explicit audience request(s)")
+    elif signals.get("question_count"):
+        reasons.append("questions present but no explicit product requests")
+    else:
+        reasons.append("no audience signals detected")
+
+    flags = risk_flags or []
+    if any(flag in flags for flag in ("referral_farming", "unverifiable_token_hype", "leveraged_signals_promotion")):
+        priority = "SKIP"
+        reasons.append("risk flags present")
+    elif score >= 3:
+        priority = "HIGH"
+    elif score >= 2:
+        priority = "MEDIUM"
+    else:
+        priority = "LOW"
+
+    return {
+        "priority": priority,
+        "score": score,
+        "max_score": max_score,
+        "in_micro_range": in_range,
+        "engagement_rate": engagement_rate,
+        "reasons": reasons,
+    }
+
 
 def slugify(text: str) -> str:
     """Make text filesystem-safe across Windows/Linux/macOS."""

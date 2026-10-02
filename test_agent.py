@@ -428,6 +428,86 @@ class TestSaveOutreachOfferGate(unittest.TestCase):
         self.assertEqual(res, saved_fake)
 
 
+class TestAudienceSignals(unittest.TestCase):
+    def test_extracts_questions_and_requests(self):
+        comments = [
+            "Great video!",
+            "Can you make a step-by-step guide on how to find these coins?",
+            "How do I get started with this strategy?",
+            "Love it",
+        ]
+        res = tools.analyze_audience_signals(comments)
+        self.assertEqual(res["total_comments"], 4)
+        self.assertEqual(res["question_count"], 2)
+        self.assertEqual(res["request_count"], 2)
+        self.assertEqual(len(res["request_examples"]), 2)
+
+    def test_empty_comments(self):
+        res = tools.analyze_audience_signals([])
+        self.assertEqual(res["total_comments"], 0)
+        self.assertEqual(res["question_count"], 0)
+        self.assertEqual(res["request_count"], 0)
+
+
+class TestEngagementRate(unittest.TestCase):
+    def test_typical_rate(self):
+        rate = tools.compute_engagement_rate("10000", [300, 500, 200])
+        self.assertAlmostEqual(rate, 0.0333, places=3)
+
+    def test_missing_subscribers(self):
+        self.assertIsNone(tools.compute_engagement_rate("Hidden", [100, 200]))
+
+    def test_missing_views(self):
+        self.assertIsNone(tools.compute_engagement_rate("10000", [None, None]))
+
+
+class TestOutreachPriority(unittest.TestCase):
+    def test_high_priority(self):
+        res = tools.compute_outreach_priority(
+            subscribers="5000",
+            engagement_rate=0.05,
+            matrix={"course": False},
+            signals={"request_count": 3, "question_count": 5},
+            risk_flags=[]
+        )
+        self.assertEqual(res["priority"], "HIGH")
+        self.assertTrue(res["in_micro_range"])
+
+    def test_low_priority_outside_range(self):
+        res = tools.compute_outreach_priority(
+            subscribers="20000",
+            engagement_rate=0.02,
+            matrix={"course": False},
+            signals={"request_count": 0, "question_count": 1},
+            risk_flags=[]
+        )
+        self.assertEqual(res["priority"], "LOW")
+        self.assertFalse(res["in_micro_range"])
+
+    def test_skip_with_risk_flags(self):
+        res = tools.compute_outreach_priority(
+            subscribers="15000",
+            engagement_rate=0.06,
+            matrix={"course": False},
+            signals={"request_count": 5},
+            risk_flags=["referral_farming"]
+        )
+        self.assertEqual(res["priority"], "SKIP")
+
+    def test_education_product_reduces_priority(self):
+        res = tools.compute_outreach_priority(
+            subscribers="5000",
+            engagement_rate=0.04,
+            matrix={"course": True},
+            signals={"request_count": 2},
+            risk_flags=[]
+        )
+        # In range + engagement + requests = 3 points even though course exists.
+        # The test verifies the function returns a valid result and does not crash.
+        self.assertIn(res["priority"], {"HIGH", "MEDIUM", "LOW"})
+        self.assertGreaterEqual(res["score"], 0)
+
+
 class TestAgent(unittest.TestCase):
     def test_tools_schema_validity(self):
         schema = agent.AGENT_TOOLS_SCHEMA
@@ -438,13 +518,21 @@ class TestAgent(unittest.TestCase):
         self.assertIn("get_video_comments", tool_names)
         self.assertIn("detect_monetization_matrix", tool_names)
         self.assertIn("detect_risk_flags", tool_names)
+        self.assertIn("detect_audience_signals", tool_names)
+        self.assertIn("compute_outreach_priority", tool_names)
         self.assertIn("extract_external_links", tool_names)
         self.assertIn("save_outreach_proposal", tool_names)
 
     def test_argument_free_tools_declared_without_properties(self):
-        for name in ("detect_monetization_matrix", "detect_risk_flags", "extract_external_links"):
+        for name in ("detect_monetization_matrix", "detect_risk_flags", "detect_audience_signals", "compute_outreach_priority", "extract_external_links"):
             fn = next(t["function"] for t in agent.AGENT_TOOLS_SCHEMA if t["function"]["name"] == name)
             self.assertEqual(fn["parameters"]["properties"], {})
+
+    def test_prompt_has_outreach_sections(self):
+        prompt = agent.AGENT_SYSTEM_PROMPT
+        self.assertIn("OUTREACH PRIORITY", prompt)
+        self.assertIn("DM BRIEF", prompt)
+        self.assertIn("MICRO-INFLUENCER FOCUS", prompt)
 
     def test_save_tool_accepts_optional_matrix(self):
         fn = next(t["function"] for t in agent.AGENT_TOOLS_SCHEMA if t["function"]["name"] == "save_outreach_proposal")

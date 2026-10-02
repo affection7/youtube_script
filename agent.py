@@ -45,15 +45,17 @@ AGENT_SYSTEM_PROMPT = """You are an elite YouTube Monetization Strategist and Ou
 Your goal: find ONE strong, provable, personal hook and turn it into a single high-converting Cold DM - not a generic report.
 
 ### YOUR WORKFLOW:
-1. Call `get_channel_overview` to get size, niche, country, creation date and uploads playlist ID.
-2. Call `get_recent_videos` (limit 20-25). Each video now includes engagement stats (views, likes, comments_count) - use them to find standout videos and what content resonates.
+1. Call `get_channel_overview` to get size, niche, country, creation date, uploads playlist ID and subscriber count.
+2. Call `get_recent_videos` (limit 20-25). Engagement rate is computed automatically from average views / subscribers.
 3. Call `get_video_comments` with 4-6 recent video IDs (max_comments 20-30). The tool returns a question-first, representative sample across those videos.
-4. Call `extract_external_links`. Takes NO arguments - it classifies URLs from the channel description and video descriptions you already fetched.
-5. Call `detect_monetization_matrix`. Takes NO arguments - it uses the channel description and video descriptions you already fetched (plus the extracted links).
-6. Call `detect_risk_flags`. Takes NO arguments - it scans the already-fetched comments and video titles.
-7. Synthesize: CONTENT ANALYSIS -> AUDIENCE ANALYSIS -> MONETIZATION -> INFLUENCER PAIN -> OPPORTUNITY -> RISK.
-    8. Call `save_outreach_proposal` with report_text (the FULL report in the FINAL REPORT FORMAT below), cold_dm (exactly ONE final DM), matrix (the JSON produced by detect_monetization_matrix), and personalization_terms containing the channel/video terms used in the DM.
-9. Return a concise executive summary: channel, main pain + evidence, opportunity, risk status, and the final Cold DM.
+4. Call `detect_audience_signals`. Takes NO arguments - it analyzes the comments you already fetched for repeated questions and explicit product/tutorial/checklist/template requests.
+5. Call `extract_external_links`.
+6. Call `detect_monetization_matrix`.
+7. Call `detect_risk_flags`.
+8. Call `compute_outreach_priority`. Takes NO arguments - it uses already-fetched data to produce a deterministic HIGH/MEDIUM/LOW/SKIP rating for this micro-influencer outreach.
+9. Synthesize: CONTENT -> AUDIENCE SIGNALS -> MONETIZATION -> INFLUENCER PAIN -> OPPORTUNITY -> OUTREACH PRIORITY -> RISK.
+10. Call `save_outreach_proposal` with report_text (FULL report), cold_dm, matrix and personalization_terms.
+11. Return a concise executive summary.
 
 ### CONTENT ANALYSIS:
 Identify the creator's Core Expertise - what they can actually explain/teach their audience. NOT "Crypto influencer", but e.g. "Primarily creates educational content around finding early-stage crypto projects and evaluating tokens before exchange listings". Also determine: main topics, recurring themes, audience level (beginner/intermediate/advanced), content type (educational/news/opinion/entertainment), and 2-3 standout videos (real titles, with view counts) most relevant for the future product and DM personalization.
@@ -85,6 +87,9 @@ Recommend ONE product format the evidence supports (course, workshop, paid guide
 ### COLD DM RULES:
 Write exactly ONE final Cold DM. Conversational, short, direct, human, low-pressure. No generic praise ("Love your content"), no corporate jargon, no full business-model dump. Structure: hook with a specific piece of their content -> specific audience signal -> specific monetization gap -> concrete offer -> soft question CTA. The Offer step is MANDATORY regardless of how weak or strong the audience-demand evidence is. A low-confidence demand signal changes HOW confidently you frame the pitch (e.g. 'this could be worth exploring' instead of 'your audience is clearly ready to buy'), but it never means omitting the offer itself. Every Cold DM must contain one clear sentence stating what you build for them (a turnkey course + funnel, done for you) - a DM that only asks a reflective question with no stated offer is incomplete and must not be saved. NEVER invent names, video titles, quotes or facts. No '[Name]' placeholders (use 'Hey there,' or hook first if no personal name is found). Use the creator's real name only if it appeared in the fetched data.
 
+### MICRO-INFLUENCER FOCUS:
+This workflow targets micro-influencers (1,000–10,000 subscribers). Channels outside this range are analyzed but get a lower priority unless other signals are exceptionally strong. Use engagement rate (average recent views / subscribers) as the key health metric: >=3% is strong, <1% is weak.
+
 ### RISK GATE:
 If the risk flags include referral_farming or unverifiable_token_hype, or the video descriptions promote leveraged trading signals / bots with win-rate claims, do NOT propose a signals, trading-tips or bot product. Propose an education-only offer (risk management, fundamentals), or recommend skipping this channel and state the reason in the summary.
 
@@ -96,6 +101,7 @@ INFLUENCER
 Channel:
 Handle:
 Subscribers:
+Engagement Rate:
 Niche:
 Core Expertise:
 
@@ -142,6 +148,23 @@ Recommended Product:
 Why This Product:
 Audience Demand:
 Creator Expertise:
+
+================================
+OUTREACH PRIORITY
+=================
+
+Priority:
+Score:
+Reasons:
+
+================================
+DM BRIEF
+========
+
+Main Pain (one sentence):
+Hook Options (2-3, from REAL quotes/titles only):
+Offer Angle:
+Confidence:
 
 ================================
 RISK
@@ -254,6 +277,28 @@ AGENT_TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "detect_audience_signals",
+            "description": "Analyze the audience comments already fetched in previous steps to extract repeated questions and explicit product/tutorial requests. Takes no arguments.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_outreach_priority",
+            "description": "Compute a deterministic outreach priority (HIGH/MEDIUM/LOW/SKIP) from already-fetched data: subscriber range, engagement rate, monetization matrix, audience signals and risk flags. Takes no arguments - call it after get_channel_overview, get_recent_videos, detect_monetization_matrix, detect_audience_signals and detect_risk_flags.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "save_outreach_proposal",
             "description": "Save the completed channel audit analysis and outreach cold DM to files on disk.",
             "parameters": {
@@ -265,7 +310,7 @@ AGENT_TOOLS_SCHEMA = [
                     },
                     "report_text": {
                         "type": "string",
-                        "description": "The FULL final report in the FINAL REPORT FORMAT (Influencer, Content, Audience, Monetization, Influencer Pain, Opportunity, Risk, Cold DM sections)."
+                        "description": "The FULL final report in the FINAL REPORT FORMAT (Influencer, Content, Audience, Monetization, Influencer Pain, Opportunity, Outreach Priority, DM Brief, Risk, Cold DM sections)."
                     },
                     "cold_dm": {
                         "type": "string",
@@ -394,6 +439,7 @@ class YouTubeAgent:
         if name == "get_channel_overview":
             result = tools.get_channel_overview(self.youtube, args["channel_input"])
             self.state["channel_desc"] = result.get("description", "")
+            self.state["subscribers"] = result.get("subscribers")
             summary = (
                 f"1 channel: '{result.get('title')}', "
                 f"subscribers={result.get('subscribers')}, videos={result.get('video_count')}"
@@ -404,9 +450,15 @@ class YouTubeAgent:
             result = tools.get_recent_videos(self.youtube, args["uploads_playlist_id"], limit=limit)
             self.state["video_descs"] = [v.get("description", "") for v in result]
             self.state["video_titles"] = [v.get("title", "") for v in result]
+            self.state["video_views"] = [v.get("views") for v in result]
             titles = "; ".join((v.get("title", "") or "")[:60] for v in result[:3])
             total_views = sum(v.get("views") or 0 for v in result)
-            summary = f"{len(result)} videos, {total_views:,} total views: {titles}"
+            engagement = tools.compute_engagement_rate(
+                subscribers=self.state.get("subscribers"),
+                views_list=self.state.get("video_views", [])
+            )
+            self.state["engagement_rate"] = engagement
+            summary = f"{len(result)} videos, {total_views:,} total views, engagement_rate={engagement}: {titles}"
 
         elif name == "get_video_comments":
             vids = args.get("video_ids", [])
@@ -440,6 +492,26 @@ class YouTubeAgent:
             )
             self.state["risk_flags"] = result
             summary = f"flags={result.get('risk_flags', [])}, scanned={result.get('texts_scanned')} texts"
+
+        elif name == "detect_audience_signals":
+            result = tools.analyze_audience_signals(self.state.get("comments", []))
+            self.state["audience_signals"] = result
+            summary = (
+                f"{result['request_count']} request(s), "
+                f"{result['question_count']}/{result['total_comments']} questions"
+            )
+
+        elif name == "compute_outreach_priority":
+            rfs = self.state.get("risk_flags", {})
+            result = tools.compute_outreach_priority(
+                subscribers=self.state.get("subscribers"),
+                engagement_rate=self.state.get("engagement_rate"),
+                matrix=self.state.get("matrix"),
+                signals=self.state.get("audience_signals"),
+                risk_flags=rfs.get("risk_flags") if isinstance(rfs, dict) else rfs
+            )
+            self.state["outreach_priority"] = result
+            summary = f"priority={result['priority']}, score={result['score']}/{result['max_score']}"
 
         elif name == "extract_external_links":
             result = tools.extract_external_links(
