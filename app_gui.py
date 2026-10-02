@@ -83,7 +83,7 @@ class YouTubeAgentGUI:
         self.ds_key_entry = ttk.Entry(key_frame, show="•", width=36)
         self.ds_key_entry.grid(row=0, column=3, padx=6, pady=2)
 
-        self.remember_keys_var = tk.BooleanVar(value=False)
+        self.remember_keys_var = tk.BooleanVar(value=True)
         remember_cb = ttk.Checkbutton(key_frame, text="Запомнить ключи", variable=self.remember_keys_var)
         remember_cb.grid(row=0, column=4, padx=12, pady=2)
 
@@ -131,15 +131,45 @@ class YouTubeAgentGUI:
         self.log_text.pack(fill=tk.BOTH, expand=True)
         paned.add(left_frame, minsize=400)
 
-        # Right: Final Output / Cold DM
+        # Right: full report + highlighted Cold DM
         right_frame = ttk.Frame(paned, style="Panel.TFrame", padding=8)
-        ttk.Label(right_frame, text="✉️ Готовое обращение (Cold DM):", style="Header.TLabel").pack(anchor="w", pady=(0, 4))
 
-        self.out_text = tk.Text(
-            right_frame, bg=BG_DARK, fg=TEXT_COLOR, insertbackground=TEXT_COLOR,
-            relief=tk.FLAT, wrap=tk.WORD, font=("Segoe UI", 11), padx=8, pady=8
+        header_row = ttk.Frame(right_frame, style="Panel.TFrame")
+        header_row.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(header_row, text="📊 Результаты анализа", style="Header.TLabel").pack(side=tk.LEFT)
+        self.copy_dm_btn = ttk.Button(
+            header_row, text="📋 Copy Cold DM", style="Accent.TButton",
+            command=self._copy_cold_dm, state=tk.DISABLED
         )
+        self.copy_dm_btn.pack(side=tk.RIGHT)
+
+        self.right_notebook = ttk.Notebook(right_frame)
+        self.right_notebook.pack(fill=tk.BOTH, expand=True)
+
+        report_tab = ttk.Frame(self.right_notebook)
+        self.right_notebook.add(report_tab, text=" 📄 Полный отчёт ")
+        self.report_text = tk.Text(
+            report_tab, bg=BG_DARK, fg=TEXT_COLOR, insertbackground=TEXT_COLOR,
+            relief=tk.FLAT, wrap=tk.WORD, font=("Segoe UI", 10), padx=8, pady=8,
+            state=tk.DISABLED
+        )
+        report_scroll = ttk.Scrollbar(report_tab, command=self.report_text.yview)
+        self.report_text.configure(yscrollcommand=report_scroll.set)
+        report_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.report_text.pack(fill=tk.BOTH, expand=True)
+
+        dm_tab = ttk.Frame(self.right_notebook)
+        self.right_notebook.add(dm_tab, text=" ✉️ Cold DM ")
+        self.out_text = tk.Text(
+            dm_tab, bg=BG_DARK, fg=TEXT_COLOR, insertbackground=TEXT_COLOR,
+            relief=tk.FLAT, wrap=tk.WORD, font=("Segoe UI", 11), padx=8, pady=8,
+            highlightbackground=ACCENT, highlightcolor=ACCENT, highlightthickness=2
+        )
+        dm_scroll = ttk.Scrollbar(dm_tab, command=self.out_text.yview)
+        self.out_text.configure(yscrollcommand=dm_scroll.set)
+        dm_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.out_text.pack(fill=tk.BOTH, expand=True)
+
         paned.add(right_frame, minsize=400)
 
     def _build_niche_tab(self):
@@ -158,21 +188,39 @@ class YouTubeAgentGUI:
         self.search_btn = ttk.Button(search_bar, text="🔍 Найти каналы", style="Accent.TButton", command=self._start_niche_search)
         self.search_btn.pack(side=tk.LEFT, padx=8)
 
-        # Filters for Monetization Matrix
-        ttk.Label(search_bar, text="Фильтр монетизации:", style="Panel.TLabel").pack(side=tk.LEFT, padx=(16, 4))
-        self.filter_var = tk.StringVar(value="Все")
-        self.filter_combo = ttk.Combobox(
-            search_bar, textvariable=self.filter_var, width=22, state="readonly",
-            values=["Все", "Без курса (course: false)", "Без сообщества (community: false)", "Без монетизации (0 методов)"]
-        )
-        self.filter_combo.pack(side=tk.LEFT, padx=4)
-        self.filter_combo.bind("<<ComboboxSelected>>", lambda _: self._apply_table_filters())
-
         self.agent_selected_btn = ttk.Button(
             search_bar, text="⚡ Запустить ИИ по выбранному", style="Accent.TButton",
             command=self._start_selected_channel_agent
         )
         self.agent_selected_btn.pack(side=tk.RIGHT, padx=6)
+
+        # Filters row: monetization matrix + subscriber range
+        filter_bar = ttk.Frame(tab, style="Panel.TFrame", padding=(10, 0, 10, 10))
+        filter_bar.pack(fill=tk.X)
+
+        # Filters for Monetization Matrix
+        ttk.Label(filter_bar, text="Фильтр монетизации:", style="Panel.TLabel").pack(side=tk.LEFT, padx=6)
+        self.filter_var = tk.StringVar(value="Все")
+        self.filter_combo = ttk.Combobox(
+            filter_bar, textvariable=self.filter_var, width=22, state="readonly",
+            values=["Все", "Без курса (course: false)", "Без сообщества (community: false)", "Без монетизации (0 методов)"]
+        )
+        self.filter_combo.pack(side=tk.LEFT, padx=4)
+        self.filter_combo.bind("<<ComboboxSelected>>", lambda _: self._apply_table_filters())
+
+        # Subscriber range filter (applied on Enter or after new search)
+        ttk.Label(filter_bar, text="Подписчики от:", style="Panel.TLabel").pack(side=tk.LEFT, padx=(16, 4))
+        self.subs_min_entry = ttk.Entry(filter_bar, width=7)
+        self.subs_min_entry.pack(side=tk.LEFT, padx=2)
+        self.subs_min_entry.insert(0, "1000")
+
+        ttk.Label(filter_bar, text="до:", style="Panel.TLabel").pack(side=tk.LEFT, padx=(8, 4))
+        self.subs_max_entry = ttk.Entry(filter_bar, width=7)
+        self.subs_max_entry.pack(side=tk.LEFT, padx=2)
+        self.subs_max_entry.insert(0, "10000")
+
+        self.subs_min_entry.bind("<Return>", lambda _: self._apply_table_filters())
+        self.subs_max_entry.bind("<Return>", lambda _: self._apply_table_filters())
 
         # Table of channels
         cols = ("title", "handle", "subscribers", "videos", "views", "matrix_summary", "country")
@@ -243,8 +291,9 @@ class YouTubeAgentGUI:
             elif msg_type == "status":
                 self.status_lbl.config(text=data)
             elif msg_type == "output":
-                self.out_text.delete("1.0", tk.END)
-                self.out_text.insert(tk.END, data)
+                self._set_dm_text(data)
+            elif msg_type == "final":
+                self._show_final_result(data)
             elif msg_type == "done":
                 self.is_running = False
                 self.run_btn.config(state=tk.NORMAL)
@@ -264,6 +313,14 @@ class YouTubeAgentGUI:
 
         filter_choice = self.filter_var.get()
 
+        def parse_subs(value: str) -> int | None:
+            value = (value or "").strip().replace(" ", "")
+            return int(value) if value.isdigit() else None
+
+        subs_min = parse_subs(self.subs_min_entry.get())
+        subs_max = parse_subs(self.subs_max_entry.get())
+        subs_filter_active = subs_min is not None or subs_max is not None
+
         for it in self.raw_niche_results:
             matrix = it.get("matrix", {})
             has_course = matrix.get("course", False)
@@ -276,6 +333,17 @@ class YouTubeAgentGUI:
                 continue
             if "Без монетизации" in filter_choice and monetization_detected:
                 continue
+
+            if subs_filter_active:
+                subs_raw = it.get("subscribers", "")
+                subs_val = int(subs_raw) if subs_raw.isdigit() else None
+                # каналы со скрытым числом подписчиков не проходят фильтр по диапазону
+                if subs_val is None:
+                    continue
+                if subs_min is not None and subs_val < subs_min:
+                    continue
+                if subs_max is not None and subs_val > subs_max:
+                    continue
 
             # Format matrix summary badges
             tags_list = []
@@ -303,6 +371,35 @@ class YouTubeAgentGUI:
                 it["country"]
             ), tags=(it["channel_id"],))
 
+    def _set_dm_text(self, text: str):
+        self.out_text.delete("1.0", tk.END)
+        self.out_text.insert(tk.END, text)
+        self.copy_dm_btn.config(state=tk.NORMAL if text.strip() else tk.DISABLED)
+
+    def _set_report_text(self, text: str):
+        self.report_text.config(state=tk.NORMAL)
+        self.report_text.delete("1.0", tk.END)
+        self.report_text.insert(tk.END, text)
+        self.report_text.config(state=tk.DISABLED)
+
+    def _show_final_result(self, data: dict):
+        report = data.get("report", "") or ""
+        dm = data.get("cold_dm", "") or ""
+        if not dm.strip() and "COLD DM" in report:
+            dm = report.split("COLD DM")[-1].strip("=\n ")
+        self._set_report_text(report)
+        self._set_dm_text(dm)
+        self.right_notebook.select(1)
+
+    def _copy_cold_dm(self):
+        dm = self.out_text.get("1.0", tk.END).strip()
+        if not dm:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(dm)
+        self.root.update()  # иначе буфер может не сохраниться после закрытия окна
+        self._set_status("✅ Cold DM скопирован в буфер обмена.")
+
     def _start_single_agent(self):
         if self.is_running:
             return
@@ -325,7 +422,9 @@ class YouTubeAgentGUI:
         self.is_running = True
         self.run_btn.config(state=tk.DISABLED)
         self.log_text.delete("1.0", tk.END)
-        self.out_text.delete("1.0", tk.END)
+        self._set_dm_text("")
+        self._set_report_text("")
+        self.right_notebook.select(1)
         self._set_status(f"Агент работает над каналом {channel}...")
 
         threading.Thread(
@@ -343,15 +442,14 @@ class YouTubeAgentGUI:
             )
             res = agent.run(channel)
 
-            dm_text = ""
+            report_text = res.get("report", "") or res.get("summary", "")
+            dm_text = res.get("cold_dm", "") or ""
             saved = res.get("saved", {})
-            if "outreach_file" in saved and os.path.exists(saved["outreach_file"]):
+            if not dm_text and "outreach_file" in saved and os.path.exists(saved["outreach_file"]):
                 with open(saved["outreach_file"], "r", encoding="utf-8") as f:
                     dm_text = f.read()
-            else:
-                dm_text = res.get("summary", "")
 
-            self.msg_queue.put(("output", dm_text))
+            self.msg_queue.put(("final", {"report": report_text, "cold_dm": dm_text}))
             self._set_status("Готово! Отчет и Cold DM сохранены.")
         except Exception as exc:
             self.msg_queue.put(("error", str(exc)))
@@ -373,13 +471,13 @@ class YouTubeAgentGUI:
             return
 
         self._set_status(f"Поиск каналов в нише '{query}'...")
-        self.is_running = True
         self.search_btn.config(state=tk.DISABLED)
 
         def search_worker():
             try:
                 from googleapiclient.discovery import build
                 yt = build("youtube", "v3", developerKey=yt_k)
+                yt._http.timeout = 120  # медленное соединение с Google API не должно обрывать поиск
                 results = tools.search_channels_by_niche(yt, query, max_results=30)
                 self.msg_queue.put(("niche_results", results))
                 self._set_status(f"Найдено {len(results)} каналов.")
