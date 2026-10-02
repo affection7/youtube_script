@@ -20,6 +20,20 @@ except ImportError:
 
 REPORTS_DIR = os.path.join("reports", "channels")
 
+COLD_DM_MIN_LENGTH = 40
+COLD_DM_MAX_LENGTH = 800
+_COLD_DM_PLACEHOLDER_RE = re.compile(
+    r"\[[^\]\r\n]{1,80}\]|\{\{?[^}\r\n]{1,80}\}?\}|<[^>\r\n]{1,80}>"
+)
+_COLD_DM_TEMPLATE_PATTERNS = (
+    "great channel",
+    "love your content",
+    "came across your channel",
+    "hope you're well",
+    "just wanted to reach out",
+    "take your channel to the next level",
+)
+
 NEGATION_INTENT_RE = re.compile(
     r"(thinking about|thinking of|planning|plan to|considering|coming soon|in the works|"
     r"планирую|планируем|в планах|думаю (?:о|про|об)|собираюсь)",
@@ -566,13 +580,49 @@ def detect_risk_flags(
     }
 
 
+def validate_cold_dm(
+    cold_dm: str,
+    personalization_terms: list[str] | None = None
+) -> dict[str, Any]:
+    """Validate a Cold DM with deterministic quality rules."""
+    text = (cold_dm or "").strip()
+    normalized = text.casefold()
+    issues: list[str] = []
+
+    if len(text) < COLD_DM_MIN_LENGTH or len(text) > COLD_DM_MAX_LENGTH:
+        issues.append(
+            f"length must be between {COLD_DM_MIN_LENGTH} and {COLD_DM_MAX_LENGTH} characters"
+        )
+    if _COLD_DM_PLACEHOLDER_RE.search(text):
+        issues.append("contains an unfilled placeholder")
+    if any(pattern in normalized for pattern in _COLD_DM_TEMPLATE_PATTERNS):
+        issues.append("contains a generic template phrase")
+
+    terms = [term.strip().casefold() for term in (personalization_terms or []) if term.strip()]
+    personalized = not terms or any(term in normalized for term in terms)
+    if terms and not personalized:
+        issues.append("does not contain a supplied personalization term")
+
+    return {
+        "valid": not issues,
+        "issues": issues,
+        "length": len(text),
+        "personalized": personalized,
+    }
+
+
 def save_outreach_proposal(
     channel_title: str,
     report_text: str,
     cold_dm: str,
-    matrix: dict[str, Any] | str | None = None
-) -> dict[str, str]:
+    matrix: dict[str, Any] | str | None = None,
+    personalization_terms: list[str] | None = None
+) -> dict[str, Any]:
     """Save the audit report, the monetization matrix and the cold outreach DM to disk."""
+    validation = validate_cold_dm(cold_dm, personalization_terms)
+    if not validation["valid"]:
+        raise ValueError("Invalid Cold DM: " + "; ".join(validation["issues"]))
+
     slug = slugify(channel_title)
     folder = get_dated_dir()
 
@@ -599,5 +649,6 @@ def save_outreach_proposal(
 
     return {
         "analysis_file": os.path.abspath(report_path),
-        "outreach_file": os.path.abspath(dm_path)
+        "outreach_file": os.path.abspath(dm_path),
+        "validation": validation,
     }

@@ -48,7 +48,7 @@ Your goal: find ONE strong, provable, personal hook and turn it into a single hi
 5. Call `detect_monetization_matrix`. Takes NO arguments - it uses the channel description and video descriptions you already fetched (plus the extracted links).
 6. Call `detect_risk_flags`. Takes NO arguments - it scans the already-fetched comments and video titles.
 7. Synthesize: CONTENT ANALYSIS -> AUDIENCE ANALYSIS -> MONETIZATION -> INFLUENCER PAIN -> OPPORTUNITY -> RISK.
-8. Call `save_outreach_proposal` with report_text (the FULL report in the FINAL REPORT FORMAT below), cold_dm (exactly ONE final DM), and matrix (the JSON produced by detect_monetization_matrix).
+    8. Call `save_outreach_proposal` with report_text (the FULL report in the FINAL REPORT FORMAT below), cold_dm (exactly ONE final DM), matrix (the JSON produced by detect_monetization_matrix), and personalization_terms containing the channel/video terms used in the DM.
 9. Return a concise executive summary: channel, main pain + evidence, opportunity, risk status, and the final Cold DM.
 
 ### CONTENT ANALYSIS:
@@ -270,6 +270,11 @@ AGENT_TOOLS_SCHEMA = [
                     "matrix": {
                         "type": "object",
                         "description": "The monetization matrix JSON produced by detect_monetization_matrix."
+                    },
+                    "personalization_terms": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Specific channel or video terms that appear in the Cold DM."
                     }
                 },
                 "required": ["channel_title", "report_text", "cold_dm"]
@@ -443,11 +448,16 @@ class YouTubeAgent:
                 result = {"error": COLD_DM_MISSING_OFFER_ERROR}
                 summary = "REJECTED: cold_dm is missing the service offer; rewrite the DM and call save_outreach_proposal again"
             else:
+                personalization_terms = args.get("personalization_terms") or []
+                if not personalization_terms:
+                    personalization_terms = [args["channel_title"]]
+                    personalization_terms.extend(self.state.get("video_titles", [])[:5])
                 saved = tools.save_outreach_proposal(
                     channel_title=args["channel_title"],
                     report_text=args["report_text"],
                     cold_dm=args["cold_dm"],
-                    matrix=args.get("matrix") or self.state.get("matrix")
+                    matrix=args.get("matrix") or self.state.get("matrix"),
+                    personalization_terms=personalization_terms
                 )
                 self.log(f"💾 [Saved] Reports written to: {saved['analysis_file']} and {saved['outreach_file']}")
                 result = saved

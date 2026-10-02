@@ -39,19 +39,23 @@ class TestTools(unittest.TestCase):
         saved = tools.save_outreach_proposal(
             channel_title="Test Channel",
             report_text="Pain points & gaps",
-            cold_dm="Hey there, great channel!"
+            cold_dm="I watched Test Channel's tutorial on automation and noticed one useful offer gap. "
+                    "Would you be open to a short breakdown?",
+            personalization_terms=["Test Channel", "automation"]
         )
         self.assertTrue(os.path.exists(saved["analysis_file"]))
         self.assertTrue(os.path.exists(saved["outreach_file"]))
 
         with open(saved["outreach_file"], "r", encoding="utf-8") as f:
-            self.assertIn("Hey there, great channel!", f.read())
+            self.assertIn("Test Channel", f.read())
 
     def test_save_outreach_proposal_with_matrix(self):
         saved = tools.save_outreach_proposal(
             channel_title="Matrix Channel",
             report_text="Audit body",
-            cold_dm="Hey there!",
+            cold_dm="Your Matrix Channel videos explain affiliate workflows clearly. "
+                    "Would you be open to a short breakdown of one additional offer?",
+            personalization_terms=["Matrix Channel", "affiliate workflows"],
             matrix={"course": False, "community": True, "confidence": 0.88}
         )
         with open(saved["analysis_file"], "r", encoding="utf-8") as f:
@@ -64,12 +68,29 @@ class TestTools(unittest.TestCase):
         saved = tools.save_outreach_proposal(
             channel_title="StringMatrix Channel",
             report_text="Audit body",
-            cold_dm="Hey there!",
+            cold_dm="Your StringMatrix Channel videos explain this topic clearly. "
+                    "Would you be open to a short breakdown of one additional offer?",
+            personalization_terms=["StringMatrix Channel"],
             matrix=json.dumps({"course": True})
         )
         with open(saved["analysis_file"], "r", encoding="utf-8") as f:
             content = f.read()
         self.assertIn('"course": true', content)
+
+    def test_validate_cold_dm(self):
+        valid = tools.validate_cold_dm(
+            "I watched Test Channel's tutorial on automation and noticed one useful offer gap. "
+            "Would you be open to a short breakdown?",
+            ["Test Channel", "automation"]
+        )
+        self.assertTrue(valid["valid"])
+
+        invalid = tools.validate_cold_dm(
+            "Hey there, great channel! [Name]",
+            ["Test Channel"]
+        )
+        self.assertFalse(invalid["valid"])
+        self.assertGreaterEqual(len(invalid["issues"]), 3)
 
 
 class TestRiskFlags(unittest.TestCase):
