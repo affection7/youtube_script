@@ -94,6 +94,7 @@ This workflow targets micro-influencers (1,000–10,000 subscribers). Channels o
 If the risk flags include referral_farming or unverifiable_token_hype, or the video descriptions promote leveraged trading signals / bots with win-rate claims, do NOT propose a signals, trading-tips or bot product. Propose an education-only offer (risk management, fundamentals), or recommend skipping this channel and state the reason in the summary.
 
 ### FINAL REPORT FORMAT (use exactly this structure in report_text):
+Use each section header EXACTLY ONCE and in the order below. Never repeat a section (MONETIZATION must appear only once). Do not add extra sections or leave duplicate headers.
 ================================
 INFLUENCER
 ==========

@@ -554,6 +554,11 @@ class TestAgent(unittest.TestCase):
         self.assertIn("DM BRIEF", prompt)
         self.assertIn("MICRO-INFLUENCER FOCUS", prompt)
 
+    def test_prompt_forbids_duplicate_sections(self):
+        prompt = agent.AGENT_SYSTEM_PROMPT
+        self.assertIn("EXACTLY ONCE", prompt)
+        self.assertIn("Never repeat a section", prompt)
+
     def test_save_tool_accepts_optional_matrix(self):
         fn = next(t["function"] for t in agent.AGENT_TOOLS_SCHEMA if t["function"]["name"] == "save_outreach_proposal")
         self.assertIn("matrix", fn["parameters"]["properties"])
