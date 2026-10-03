@@ -17,6 +17,7 @@ except ImportError:
     build = None
 
 import tools
+import llm
 
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_MODEL = "deepseek-chat"
@@ -422,6 +423,9 @@ class YouTubeAgent:
         self.youtube._http.timeout = 120  # медленное соединение с Google API не должно обрывать запросы
         self.deepseek_api_key = deepseek_api_key
         self.model = os.environ.get("DEEPSEEK_MODEL") or model
+        # LLM provider is behind an interface; DeepSeek is the only one for now.
+        provider_name = os.environ.get("LLM_PROVIDER", llm.DEFAULT_PROVIDER)
+        self.provider = llm.create_provider(provider_name, post_deepseek)
         self.on_log = on_log or (lambda msg: None)
         # Data accumulated from tool results; argument-free tools read from here.
         self.state: dict[str, Any] = {}
@@ -577,7 +581,7 @@ class YouTubeAgent:
                 "temperature": 0.3,
             }
 
-            resp = post_deepseek(self.deepseek_api_key, payload, model=self.model)
+            resp = self.provider.chat(self.deepseek_api_key, payload, model=self.model)
             choice = resp["choices"][0]
             msg = choice["message"]
             messages.append(msg)

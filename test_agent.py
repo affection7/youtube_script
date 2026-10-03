@@ -8,6 +8,7 @@ import urllib.error
 
 import tools
 import agent
+import llm
 
 
 class TestTools(unittest.TestCase):
@@ -81,6 +82,22 @@ class TestTools(unittest.TestCase):
         with open(saved["analysis_file"], "r", encoding="utf-8") as f:
             content = f.read()
         self.assertIn('"course": true', content)
+
+    def test_save_outreach_proposal_writes_json(self):
+        saved = tools.save_outreach_proposal(
+            channel_title="Json Channel",
+            report_text="Audit body",
+            cold_dm="Your Json Channel videos explain affiliate workflows clearly. "
+                    "Would you be open to a short breakdown of one additional offer?",
+            personalization_terms=["Json Channel", "affiliate workflows"],
+            matrix={"course": False, "affiliate": True},
+        )
+        self.assertTrue(os.path.exists(saved["analysis_json_file"]))
+        with open(saved["analysis_json_file"], "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["channel_title"], "Json Channel")
+        self.assertTrue(data["matrix"]["affiliate"])
+        self.assertTrue(data["validation"]["valid"])
 
     def test_validate_cold_dm(self):
         valid = tools.validate_cold_dm(
@@ -526,6 +543,29 @@ class TestOutreachPriority(unittest.TestCase):
         # The test verifies the function returns a valid result and does not crash.
         self.assertIn(res["priority"], {"HIGH", "MEDIUM", "LOW"})
         self.assertGreaterEqual(res["score"], 0)
+
+
+class TestLLMProvider(unittest.TestCase):
+    def test_deepseek_provider_delegates(self):
+        calls = []
+
+        def fake_chat(api_key, payload, model):
+            calls.append((api_key, payload, model))
+            return {"ok": True}
+
+        provider = llm.create_provider("deepseek", fake_chat)
+        self.assertEqual(provider.name, "deepseek")
+        self.assertEqual(provider.chat("k", {"a": 1}, "m"), {"ok": True})
+        self.assertEqual(calls, [("k", {"a": 1}, "m")])
+
+    def test_unknown_provider_rejected(self):
+        with self.assertRaises(ValueError):
+            llm.create_provider("gemini", lambda api_key, payload, model: {})
+
+    def test_agent_uses_provider(self):
+        with patch("agent.build"):
+            ag = agent.YouTubeAgent(youtube_api_key="k", deepseek_api_key="d")
+        self.assertEqual(ag.provider.name, "deepseek")
 
 
 class TestAgent(unittest.TestCase):

@@ -844,8 +844,21 @@ def save_outreach_proposal(
     with open(dm_path, "w", encoding="utf-8") as f:
         f.write(cold_dm.strip() + "\n")
 
+    json_payload = {
+        "channel_title": channel_title,
+        "report_text": report_text.strip(),
+        "matrix": matrix if isinstance(matrix, (dict, list)) else None,
+        "cold_dm": cold_dm.strip(),
+        "validation": validation,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    json_path = os.path.join(folder, f"analysis_{slug}.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(json_payload, f, ensure_ascii=False, indent=2)
+
     return {
         "analysis_file": os.path.abspath(report_path),
         "outreach_file": os.path.abspath(dm_path),
+        "analysis_json_file": os.path.abspath(json_path),
         "validation": validation,
     }
